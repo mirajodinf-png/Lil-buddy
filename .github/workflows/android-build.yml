@@ -1,0 +1,78 @@
+name: Android Debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/android-build.yml'
+      - 'lil-buddy-android-project-prepared.zip'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Extract project
+        run: |
+          mkdir project
+          unzip -q lil-buddy-android-project-prepared.zip -d project
+          echo "Extracted project contents:"
+          find project -maxdepth 3 -type f | head -100
+          test -f project/settings.gradle.kts || \
+            test -f project/lil-buddy/settings.gradle.kts
+
+      - name: Locate Android project
+        run: |
+          if [ -f project/settings.gradle.kts ]; then
+            echo "PROJECT_DIR=project" >> "$GITHUB_ENV"
+          elif [ -f project/lil-buddy/settings.gradle.kts ]; then
+            echo "PROJECT_DIR=project/lil-buddy" >> "$GITHUB_ENV"
+          else
+            echo "ERROR: settings.gradle.kts not found"
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Install Gradle 8.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.6'
+
+      - name: Generate Gradle wrapper if missing
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ ! -f gradlew ] || \
+             [ ! -f gradle/wrapper/gradle-wrapper.jar ] || \
+             [ ! -f gradle/wrapper/gradle-wrapper.properties ]; then
+            gradle wrapper --gradle-version 8.6
+          fi
+          chmod +x gradlew
+
+      - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lil-buddy-debug-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          
